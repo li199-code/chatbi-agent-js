@@ -1,5 +1,6 @@
-import fs from "fs";
+import fs from "fs/promises";
 import { z } from "zod";
+import path from "path";
 import axios from "axios";
 import { tool } from "@langchain/core/tools";
 import dotenv from "dotenv";
@@ -122,8 +123,8 @@ export const chatbiAnalyzeTool = tool(
       return {
         success: true,
         data: {
-          drilldown:normalizedDrilldown,
           total,
+          drilldown:normalizedDrilldown,
           impactFactorProperties
         },
         query: input.query,
@@ -168,7 +169,11 @@ export const saveFile = tool(
     content: string;
   }) => {
     try {
-      fs.writeFileSync(input.fileName, input.content);
+      const folder = path.resolve(process.cwd(), "reports");
+      await fs.mkdir(folder, { recursive: true });
+
+      const filePath = path.join(folder, input.fileName);
+      await fs.writeFile(filePath, input.content, "utf-8");
       return "保存成功"
     } catch (error) {
       return "保存失败"
@@ -176,7 +181,7 @@ export const saveFile = tool(
   },
   {
     name: "save_report_file",
-    description: `保存文件在当前文件夹下，参数为文件名，返回值为保存成功与否`,
+    description: `保存生成的报告为markdown文件，参数为文件名，返回值为保存成功与否`,
     schema: z.object({
       fileName: z.string().describe("文件名"),
       content: z.string().describe("文件内容")

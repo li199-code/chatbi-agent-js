@@ -8,6 +8,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { Runnable } from "@langchain/core/runnables";
 import { AgentState, runAgentNode } from "./utils";
 import { END, START, StateGraph } from "@langchain/langgraph";
+import { scopeAgentPrompt, searchAgentPrompt, writerAgentPrompt } from "./prompts";
 
 const tools = [chatbiAnalyzeTool, chatbiAskTool, saveFile];
 // This runs tools in the graph
@@ -17,10 +18,28 @@ const llm = new ChatDeepSeek({
     model: "deepseek-reasoner"
 });
 
-const researchAgent = await createAgent({
+const scopeAgent = await createAgent({
   llm,
   tools: [chatbiAnalyzeTool],
-  systemMessage: "你是一个根据给出的数据，提取趋势的助手。每次调用`chatbiAnalyzeTool`的时候，记得query字符串要包含“同比”字样。把提取出的趋势发送给writeNode用于生成文章。"
+  systemMessage: scopeAgentPrompt
+});
+
+async function scopeNode(
+  state: typeof AgentState.State,
+  config?: RunnableConfig,
+) {
+  return runAgentNode({
+    state: state,
+    agent: scopeAgent,
+    name: "Scope",
+    config,
+  });
+}
+
+const researchAgent = await createAgent({
+  llm,
+  tools: [chatbiAskTool],
+  systemMessage: searchAgentPrompt
 });
 
 async function researchNode(
@@ -38,7 +57,7 @@ async function researchNode(
 const writeAgent = await createAgent({
   llm,
   tools: [saveFile],
-  systemMessage: "你一个根据给定数据，生成文章的助手。生成的文章尽量照顾到数据的多个方面，字数不少于2千字。生成好的文章以markdown格式保存到当前文件夹"
+  systemMessage: writerAgentPrompt
 });
 
 async function writeNode(
@@ -74,11 +93,19 @@ function router(state: typeof AgentState.State) {
 // 1. Create the graph
 const workflow = new StateGraph(AgentState)
    // 2. Add the nodes; these will do the work
+   .addNode("Scope", scopeNode)
   .addNode("Researcher", researchNode)
   .addNode("Writer", writeNode)
   .addNode("call_tool", toolNode);
 
-// 注册 tool 调用节点
+workflow.addEdge(START, "Scope");
+
+workflow.addConditionalEdges("Scope", router, {
+  "call_tool": "call_tool",
+  continue: "Researcher",
+  end: END,
+})
+
 
 // Researcher 调用工具或流向 Writer
 workflow.addConditionalEdges("Researcher", router, {
@@ -91,17 +118,17 @@ workflow.addConditionalEdges("Researcher", router, {
 workflow.addConditionalEdges("Writer", router, {
   call_tool: "call_tool",
   continue: END,
-  end: END,
+  // end: END,
 });
 
 // tool 调用完成后回到 sender
 workflow.addConditionalEdges("call_tool", (state) => state.sender, {
+  Scope: "Scope",
   Researcher: "Researcher",
   Writer: "Writer",
 });
 
-// 起点是 Researcher
-workflow.addEdge(START, "Researcher");
+
 
 
 export const graph = workflow.compile();

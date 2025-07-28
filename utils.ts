@@ -54,6 +54,8 @@ export async function createAgent({
     ],
     new MessagesPlaceholder("messages"),
   ]);
+
+  // 拼接生成最终的提示词
   prompt = await prompt.partial({
     system_message: systemMessage,
     tool_names: toolNames,
